@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+torch
+torchaudio
+huggingface-hub
+moshi
+sphn
+numpy
