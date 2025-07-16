@@ -10,7 +10,6 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import uvicorn
-# No longer calling hf_hub_download manually
 from moshi.models import loaders, LMGen
 
 # --- Configuration ---
@@ -38,12 +37,11 @@ def initialize_models():
         repo_id = "kyutai/moshiko-pytorch-bf16" 
         
         # ---
-        # FINAL FIX: Use the library's intended function to handle all downloads.
-        # This function knows the correct filenames and repository structure.
-        # We no longer need to manually guess 'mimi.bin', 'pytorch_model.bin', etc.
+        # FINAL VERIFIED FIX: The 'repo_id' argument must be positional, not a keyword.
+        # This is the correct way to call the function based on the library's source code.
         # ---
         logger.info(f"Fetching model info from repo: {repo_id}")
-        checkpoint_info = loaders.CheckpointInfo.from_hf_repo(repo_id=repo_id)
+        checkpoint_info = loaders.CheckpointInfo.from_hf_repo(repo_id)
         logger.info("Checkpoint info retrieved successfully.")
 
         # Now, load the models from the information the library gathered.
