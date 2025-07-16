@@ -37,9 +37,9 @@ def initialize_models():
         # Using the official Kyutai repository for Moshiko (male voice)
         repo_id = "kyutai/moshiko-pytorch-bf16" 
         
-        # --- FIX: Changed 'repo' keyword argument to 'repo_id' ---
-        mimi_path = hf_hub_download(repo_id=repo_id, filename="mimi.bin")
-        moshi_path = hf_hub_download(repo_id=repo_id, filename="moshi.bin")
+        # --- FIX: Using the CORRECT filenames from the Hugging Face repo ---
+        mimi_path = hf_hub_download(repo_id=repo_id, filename="mimi_state_dict.bin")
+        moshi_path = hf_hub_download(repo_id=repo_id, filename="model_state_dict.bin")
         tokenizer_path = hf_hub_download(repo_id=repo_id, filename="tokenizer.model")
 
         checkpoint_info = loaders.CheckpointInfo(
@@ -106,6 +106,8 @@ async def get_index(request: Request):
 
 @app.get('/favicon.ico', include_in_schema=False)
 async def favicon():
+    # It's good practice to have this route to avoid 404s
+    # Create an empty static/favicon.ico file
     return FileResponse("static/favicon.ico")
 
 @app.websocket("/ws")
@@ -143,6 +145,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 for i in range(num_frames):
                     start = i * frame_size
                     end = start + frame_size
+                    # The unsqueeze adds the channel dimension
                     chunk = torch.from_numpy(audio_frames[..., start:end]).to(device).unsqueeze(0)
 
                     # 3. Encode user audio and generate response
@@ -153,7 +156,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         # 4. Decode AI audio response to raw PCM
                         audio_out_pcm = mimi.decode(tokens_out[:, 1:]).cpu().numpy().squeeze()
                         
-                        # --- FIX: Send raw float32 audio bytes directly to the client ---
+                        # Send raw float32 audio bytes directly to the client
                         await websocket.send_bytes(audio_out_pcm.astype(np.float32).tobytes())
 
                         # 5. Decode AI text response for transcription
