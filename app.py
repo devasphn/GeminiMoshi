@@ -37,9 +37,10 @@ def initialize_models():
         # Using the official Kyutai repository for Moshiko (male voice)
         repo_id = "kyutai/moshiko-pytorch-bf16" 
         
-        mimi_path = hf_hub_download(repo=repo_id, filename="mimi.bin")
-        moshi_path = hf_hub_download(repo=repo_id, filename="moshi.bin")
-        tokenizer_path = hf_hub_download(repo=repo_id, filename="tokenizer.model")
+        # --- FIX: Changed 'repo' keyword argument to 'repo_id' ---
+        mimi_path = hf_hub_download(repo_id=repo_id, filename="mimi.bin")
+        moshi_path = hf_hub_download(repo_id=repo_id, filename="moshi.bin")
+        tokenizer_path = hf_hub_download(repo_id=repo_id, filename="tokenizer.model")
 
         checkpoint_info = loaders.CheckpointInfo(
             repo_id, moshi_path, mimi_path, tokenizer_path
@@ -61,13 +62,12 @@ def initialize_models():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load the ML models
+    # Load the ML models on startup
     initialize_models()
     yield
-    # Clean up the ML models and release the resources
-    global mimi, lm_gen
-    mimi = None
-    lm_gen = None
+    # Clean up on shutdown
+    global mimi, lm_gen, text_tokenizer
+    mimi, lm_gen, text_tokenizer = None, None, None
     logger.info("Cleaned up models.")
 
 
@@ -88,9 +88,6 @@ class ConversationState:
 
     def apply_emotion_to_text(self, text: str) -> str:
         """Applies emotional context to the AI's response text."""
-        # This is a placeholder for more advanced emotional TTS.
-        # Moshi's fine-tuning would be the proper way to achieve this.
-        # For now, we prepend a tag that the user can see.
         tags = {
             "whispering": "*whispers*",
             "giggling": "*giggles*",
@@ -121,47 +118,26 @@ async def websocket_endpoint(websocket: WebSocket):
     
     # Initialize streaming components for this connection
     opus_reader = sphn.OpusStreamReader(sample_rate=mimi.sample_rate)
-    opus_writer = sphn.OpusStreamWriter(sample_rate=mimi.sample_rate)
     frame_size = int(mimi.sample_rate / mimi.frame_rate)
-
-    async def forward_to_client():
-        """Listens for generated audio from the model and sends it to the client."""
-        while True:
-            try:
-                # Get generated audio bytes from the writer
-                audio_bytes = opus_writer.read_bytes()
-                if len(audio_bytes) > 0:
-                    await websocket.send_bytes(audio_bytes)
-                await asyncio.sleep(0.01) # Non-blocking sleep
-            except WebSocketDisconnect:
-                logger.info("Client disconnected during send.")
-                break
-            except Exception as e:
-                logger.error(f"Error in send loop: {e}")
-                break
-
-    client_sender_task = asyncio.create_task(forward_to_client())
 
     try:
         with torch.no_grad(), lm_gen.streaming(1), mimi.streaming(1):
             while True:
-                # 1. Receive data from client (could be audio or JSON command)
+                # 1. Receive data from client (audio or JSON command)
                 message = await websocket.receive()
 
                 if "bytes" in message:
-                    # Append incoming audio bytes to the Opus reader
                     opus_reader.append_bytes(message["bytes"])
                 elif "text" in message:
-                    # Handle JSON commands from the client (e.g., changing emotion)
                     data = json.loads(message["text"])
                     if data.get("action") == "set_emotion":
                         state.set_emotion(data.get("emotion"))
-                        continue
+                    continue # Skip audio processing for command messages
 
                 # 2. Process complete audio frames
                 audio_frames = opus_reader.read_pcm()
                 if audio_frames.shape[-1] < frame_size:
-                    continue # Not enough data for a full frame
+                    continue 
 
                 num_frames = audio_frames.shape[-1] // frame_size
                 for i in range(num_frames):
@@ -169,27 +145,24 @@ async def websocket_endpoint(websocket: WebSocket):
                     end = start + frame_size
                     chunk = torch.from_numpy(audio_frames[..., start:end]).to(device).unsqueeze(0)
 
-                    # 3. Encode user audio with Mimi
+                    # 3. Encode user audio and generate response
                     codes = mimi.encode(chunk)
-                    
-                    # 4. Generate response with Moshi LM
                     tokens_out = lm_gen.step(codes)
                     
                     if tokens_out is not None:
-                        # Decode AI audio response
-                        audio_out = mimi.decode(tokens_out[:, 1:]).cpu().numpy().squeeze()
-                        opus_writer.append_pcm(audio_out)
+                        # 4. Decode AI audio response to raw PCM
+                        audio_out_pcm = mimi.decode(tokens_out[:, 1:]).cpu().numpy().squeeze()
+                        
+                        # --- FIX: Send raw float32 audio bytes directly to the client ---
+                        await websocket.send_bytes(audio_out_pcm.astype(np.float32).tobytes())
 
-                        # Decode AI text response for transcription
+                        # 5. Decode AI text response for transcription
                         text_token = tokens_out[0, 0, 0].item()
                         if text_token not in (0, 3, text_tokenizer.eos_id(), text_tokenizer.pad_id()):
                             ai_text = text_tokenizer.decode([text_token])
-                            # Send transcription to client
                             response = {
                                 "type": "transcript",
-                                "data": {
-                                    "ai_text": state.apply_emotion_to_text(ai_text)
-                                }
+                                "data": {"ai_text": state.apply_emotion_to_text(ai_text)}
                             }
                             await websocket.send_text(json.dumps(response))
 
@@ -198,15 +171,9 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"An error occurred in the WebSocket handler: {e}", exc_info=True)
     finally:
-        client_sender_task.cancel()
         await websocket.close()
         logger.info("WebSocket connection closed.")
 
 
 if __name__ == "__main__":
-    # Ensure models are loaded before starting the server if running directly
-    if not mimi or not lm_gen:
-        initialize_models()
-    
-    # Use reload=True for development to auto-restart on code changes
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
