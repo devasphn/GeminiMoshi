@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoshiAI Voice Assistant</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="container">
+        <h1>MoshiAI Voice Assistant</h1>
+        
+        <div class="controls">
+            <button id="startCall" class="btn btn-primary" aria-label="Start the call">Start Call</button>
+            <button id="endCall" class="btn btn-danger" disabled aria-label="End the call">End Call</button>
+            <button id="muteBtn" class="btn btn-secondary" disabled aria-label="Mute or unmute">Mute</button>
+        </div>
+        
+        <div class="emotion-controls">
+            <h3>Current Emotion: <span id="currentEmotion">happy</span></h3>
+            <div class="emotion-buttons">
+                <button class="emotion-btn active" data-emotion="happy" aria-label="Set happy emotion">Happy</button>
+                <button class="emotion-btn" data-emotion="sad" aria-label="Set sad emotion">Sad</button>
+                <button class="emotion-btn" data-emotion="excited" aria-label="Set excited emotion">Excited</button>
+                <button class="emotion-btn" data-emotion="calm" aria-label="Set calm emotion">Calm</button>
+                <button class="emotion-btn" data-emotion="whispering" aria-label="Set whispering emotion">Whispering</button>
+                <button class="emotion-btn" data-emotion="singing" aria-label="Set singing emotion">Singing</button>
+                <button class="emotion-btn" data-emotion="dramatic" aria-label="Set dramatic emotion">Dramatic</button>
+                <button class="emotion-btn" data-emotion="giggling" aria-label="Set giggling emotion">Giggling</button>
+            </div>
+        </div>
+        
+        <div class="transcription">
+            <h3>Conversation</h3>
+            <div class="transcript-container">
+                <div class="transcript user">
+                    <strong>You:</strong> <span class="text" id="userTranscriptText">...</span>
+                </div>
+                <div class="transcript ai">
+                    <strong>AI:</strong> <span class="text" id="aiTranscriptText">...</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status">
+            <div id="connectionStatus" class="status-indicator disconnected">Disconnected</div>
+        </div>
+    </div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>
