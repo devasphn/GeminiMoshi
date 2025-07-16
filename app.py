@@ -37,9 +37,10 @@ def initialize_models():
         # Using the official Kyutai repository for Moshiko (male voice)
         repo_id = "kyutai/moshiko-pytorch-bf16" 
         
-        # --- FIX: Using the CORRECT filenames from the Hugging Face repo ---
-        mimi_path = hf_hub_download(repo_id=repo_id, filename="mimi_state_dict.bin")
-        moshi_path = hf_hub_download(repo_id=repo_id, filename="model_state_dict.bin")
+        # --- FINAL FIX: Using the VERIFIED filenames from the Hugging Face repo ---
+        # The main model is 'pytorch_model.bin' and the codec is 'mimi.bin'
+        mimi_path = hf_hub_download(repo_id=repo_id, filename="mimi.bin")
+        moshi_path = hf_hub_download(repo_id=repo_id, filename="pytorch_model.bin")
         tokenizer_path = hf_hub_download(repo_id=repo_id, filename="tokenizer.model")
 
         checkpoint_info = loaders.CheckpointInfo(
@@ -106,8 +107,7 @@ async def get_index(request: Request):
 
 @app.get('/favicon.ico', include_in_schema=False)
 async def favicon():
-    # It's good practice to have this route to avoid 404s
-    # Create an empty static/favicon.ico file
+    # Create an empty static/favicon.ico file to prevent 404s
     return FileResponse("static/favicon.ico")
 
 @app.websocket("/ws")
@@ -134,7 +134,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     data = json.loads(message["text"])
                     if data.get("action") == "set_emotion":
                         state.set_emotion(data.get("emotion"))
-                    continue # Skip audio processing for command messages
+                    continue
 
                 # 2. Process complete audio frames
                 audio_frames = opus_reader.read_pcm()
