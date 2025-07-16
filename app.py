@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 import uvicorn
-from huggingface_hub import hf_hub_download
+# No longer calling hf_hub_download manually
 from moshi.models import loaders, LMGen
 
 # --- Configuration ---
@@ -25,7 +25,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --- Model Loading ---
 def initialize_models():
-    """Loads and initializes the Moshi and Mimi models."""
+    """Loads and initializes the Moshi and Mimi models the correct way."""
     global mimi, lm_gen, text_tokenizer
     if mimi and lm_gen:
         logger.info("Models already loaded.")
@@ -34,19 +34,19 @@ def initialize_models():
     try:
         logger.info("Loading Moshi models from Hugging Face...")
         
-        # Using the official Kyutai repository for Moshiko (male voice)
+        # Define the repository to use
         repo_id = "kyutai/moshiko-pytorch-bf16" 
         
-        # --- FINAL FIX: Using the VERIFIED filenames from the Hugging Face repo ---
-        # The main model is 'pytorch_model.bin' and the codec is 'mimi.bin'
-        mimi_path = hf_hub_download(repo_id=repo_id, filename="mimi.bin")
-        moshi_path = hf_hub_download(repo_id=repo_id, filename="pytorch_model.bin")
-        tokenizer_path = hf_hub_download(repo_id=repo_id, filename="tokenizer.model")
+        # ---
+        # FINAL FIX: Use the library's intended function to handle all downloads.
+        # This function knows the correct filenames and repository structure.
+        # We no longer need to manually guess 'mimi.bin', 'pytorch_model.bin', etc.
+        # ---
+        logger.info(f"Fetching model info from repo: {repo_id}")
+        checkpoint_info = loaders.CheckpointInfo.from_hf_repo(repo_id=repo_id)
+        logger.info("Checkpoint info retrieved successfully.")
 
-        checkpoint_info = loaders.CheckpointInfo(
-            repo_id, moshi_path, mimi_path, tokenizer_path
-        )
-
+        # Now, load the models from the information the library gathered.
         mimi = checkpoint_info.get_mimi(device=device)
         mimi.set_num_codebooks(8)
         
@@ -107,7 +107,6 @@ async def get_index(request: Request):
 
 @app.get('/favicon.ico', include_in_schema=False)
 async def favicon():
-    # Create an empty static/favicon.ico file to prevent 404s
     return FileResponse("static/favicon.ico")
 
 @app.websocket("/ws")
@@ -118,14 +117,12 @@ async def websocket_endpoint(websocket: WebSocket):
     
     state = ConversationState()
     
-    # Initialize streaming components for this connection
     opus_reader = sphn.OpusStreamReader(sample_rate=mimi.sample_rate)
     frame_size = int(mimi.sample_rate / mimi.frame_rate)
 
     try:
         with torch.no_grad(), lm_gen.streaming(1), mimi.streaming(1):
             while True:
-                # 1. Receive data from client (audio or JSON command)
                 message = await websocket.receive()
 
                 if "bytes" in message:
@@ -136,7 +133,6 @@ async def websocket_endpoint(websocket: WebSocket):
                         state.set_emotion(data.get("emotion"))
                     continue
 
-                # 2. Process complete audio frames
                 audio_frames = opus_reader.read_pcm()
                 if audio_frames.shape[-1] < frame_size:
                     continue 
@@ -145,21 +141,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 for i in range(num_frames):
                     start = i * frame_size
                     end = start + frame_size
-                    # The unsqueeze adds the channel dimension
                     chunk = torch.from_numpy(audio_frames[..., start:end]).to(device).unsqueeze(0)
 
-                    # 3. Encode user audio and generate response
                     codes = mimi.encode(chunk)
                     tokens_out = lm_gen.step(codes)
                     
                     if tokens_out is not None:
-                        # 4. Decode AI audio response to raw PCM
                         audio_out_pcm = mimi.decode(tokens_out[:, 1:]).cpu().numpy().squeeze()
-                        
-                        # Send raw float32 audio bytes directly to the client
                         await websocket.send_bytes(audio_out_pcm.astype(np.float32).tobytes())
 
-                        # 5. Decode AI text response for transcription
                         text_token = tokens_out[0, 0, 0].item()
                         if text_token not in (0, 3, text_tokenizer.eos_id(), text_tokenizer.pad_id()):
                             ai_text = text_tokenizer.decode([text_token])
